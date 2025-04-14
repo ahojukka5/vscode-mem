@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # Copyright (c) 2025 Jukka Aho
 # 
@@ -20,18 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-case $BASH_VERSION in
-'' | [0-3].*)
-  echo "ERROR: Bash 4.0 required" >&2
-  exit 1
-  ;;
-esac
-
-set -o errexit
+set -e
 set -o pipefail
 
-initscript=$0
-initscript=${initscript##*/}
+initscript=$(basename "$0")
 
 usage() {
   cat <<EOF
@@ -98,7 +90,7 @@ QUIET=0
 
 eval set -- "${@//=/ }" # replace = with ' '
 
-while (("$#")); do
+while [ "$#" -gt 0 ]; do
   case "$1" in
   -h | --help)
     SHOW_HELP=1
@@ -107,7 +99,7 @@ while (("$#")); do
   --set-max-old-space-size)
     MAX_OLD_SPACE_SIZE=${2:-4096}
     SET_MAX_OLD_SPACE_SIZE=1
-    if [[ -z "$2" ]]; then
+    if [ -z "$2" ]; then
       echo "No size provided for --set-max-old-space-size. Using default: $MAX_OLD_SPACE_SIZE MB."
     fi
     shift 2
@@ -138,12 +130,12 @@ while (("$#")); do
 done
 
 log() {
-  if [[ $QUIET -eq 0 ]]; then
+  if [ "$QUIET" -eq 0 ]; then
     echo "$@"
   fi
 }
 
-if [[ -v SHOW_HELP ]]; then
+if [ -n "${SHOW_HELP+x}" ]; then
   usage
   description
   extra_help
@@ -151,25 +143,25 @@ if [[ -v SHOW_HELP ]]; then
 fi
 
 # Set default values if not provided
-if [[ -z "$VSCODE_SERVER_DIR" ]]; then
-  VSCODE_SERVER_DIR=$(ls -td $HOME/.vscode-server/cli/servers/Stable-* 2>/dev/null | head -n 1)
+if [ -z "$VSCODE_SERVER_DIR" ]; then
+  VSCODE_SERVER_DIR=$(ls -td "$HOME"/.vscode-server/cli/servers/Stable-* 2>/dev/null | head -n 1)
 fi
 
-if [[ -z "$VSCODE_SERVER_DIR" ]]; then
+if [ -z "$VSCODE_SERVER_DIR" ]; then
   log "No vscode-server installation found."
   exit 1
 fi
 
 CODE_SERVER_SCRIPT="$VSCODE_SERVER_DIR/server/bin/code-server"
 
-if [[ ! -f "$CODE_SERVER_SCRIPT" ]]; then
+if [ ! -f "$CODE_SERVER_SCRIPT" ]; then
   log "code-server script not found in the most recent vscode-server installation."
   exit 1
 fi
 
 CODE_SERVER_IDENTIFIER=$(basename "$VSCODE_SERVER_DIR")
 
-if [[ $SET_MAX_OLD_SPACE_SIZE -eq 1 ]]; then
+if [ "$SET_MAX_OLD_SPACE_SIZE" -eq 1 ]; then
   # Check if the current value matches the desired value
   if tail -n 1 "$CODE_SERVER_SCRIPT" | grep -q -- "--max-old-space-size=$MAX_OLD_SPACE_SIZE"; then
     log "Did not update code-server script to set --max-old-space-size=$MAX_OLD_SPACE_SIZE: already set"
@@ -201,16 +193,16 @@ fi
 # Attempt to find Node.js processes
 NODE_PIDS=$(ps x | grep "$CODE_SERVER_IDENTIFIER/server/$NODEAPP" | grep -v grep | awk '{print $1}')
 
-if [[ -z "$NODE_PIDS" ]]; then
-  log -e "\nNo Node.js processes found for the most recent VS Code Server installation.\n"
+if [ -z "$NODE_PIDS" ]; then
+  log "\nNo Node.js processes found for the most recent VS Code Server installation.\n"
 else
-  log -e "\nInspecting memory usage for Node.js processes:\n"
+  log "\nInspecting memory usage for Node.js processes:\n"
   log "$(printf "% 8s %12s %12s %12s %12s\n" "PID" "VmPeak" "VmSize" "VmHWM" "VmRSS")"
   for pid in $NODE_PIDS; do
-    VmPeak=$(awk '/VmPeak/ {print $2}' /proc/$pid/status)
-    VmSize=$(awk '/VmSize/ {print $2}' /proc/$pid/status)
-    VmHWM=$(awk '/VmHWM/ {print $2}' /proc/$pid/status)
-    VmRSS=$(awk '/VmRSS/ {print $2}' /proc/$pid/status)
+    VmPeak=$(awk '/VmPeak/ {print $2}' /proc/"$pid"/status)
+    VmSize=$(awk '/VmSize/ {print $2}' /proc/"$pid"/status)
+    VmHWM=$(awk '/VmHWM/ {print $2}' /proc/"$pid"/status)
+    VmRSS=$(awk '/VmRSS/ {print $2}' /proc/"$pid"/status)
     log "$(printf "% 8s %12s %12s %12s %12s\n" "$pid" "$((VmPeak / 1024)) MB" "$((VmSize / 1024)) MB" "$((VmHWM / 1024)) MB" "$((VmRSS / 1024)) MB")"
   done
   log
@@ -218,19 +210,20 @@ fi
 
 # Check maximum virtual memory size using ulimit
 ULIMIT_VMEM=$(ulimit -v)
-if [[ "$ULIMIT_VMEM" -eq "unlimited" ]]; then
-  log -e "Maximum virtual memory size: unlimited\n"
+if [ "$ULIMIT_VMEM" = "unlimited" ]; then
+  log "Maximum virtual memory size: unlimited\n"
 else
-  log -e "Maximum virtual memory size: $((ULIMIT_VMEM / 1024)) MB\n"
+  log "Maximum virtual memory size: $((ULIMIT_VMEM / 1024)) MB\n"
 fi
 
 log "Memory term explanations:"
+log ""
 log "- VmPeak: Peak virtual memory size used by the process."
 log "- VmSize: Current virtual memory size allocated to the process."
 log "- VmHWM: Peak resident set size (\"high water mark\"), the maximum physical memory used."
 log "- VmRSS: Current resident set size, the physical memory currently used."
-
+log ""
 log "To restrict memory usage, run:"
 log "  $initscript --set-max-old-space-size=N"
-
+log ""
 log "Replace N with the desired memory limit in MB (default: 4096)."

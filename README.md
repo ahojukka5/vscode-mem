@@ -1,5 +1,13 @@
 ## vscode-mem - solve Remote-SSH disconnection issues in Visual Studio Code
 
+**TLDR**:
+
+```bash
+wget https://raw.githubusercontent.com/ahojukka5/vscode-mem/refs/heads/master/vscode-mem
+chmod +x vscode-mem
+./vscode-mem --set-max-old-space-size=8192
+```
+
 Are you experiencing mysterious Remote-SSH disconnections in Visual Studio Code?
 This issue is often caused by Node.js reserving excessive virtual memory,
 exceeding system limits in shared environments. This repository provides a
