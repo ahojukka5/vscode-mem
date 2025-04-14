@@ -1,0 +1,236 @@
+#!/bin/bash
+
+# Copyright (c) 2025 Jukka Aho
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+case $BASH_VERSION in
+'' | [0-3].*)
+  echo "ERROR: Bash 4.0 required" >&2
+  exit 1
+  ;;
+esac
+
+set -o errexit
+set -o pipefail
+
+initscript=$0
+initscript=${initscript##*/}
+
+usage() {
+  cat <<EOF
+usage: $initscript [-h] [--set-max-old-space-size=N] [--nodeapp=NAME] [--vscode-dir=DIR] [--quiet]
+
+EOF
+}
+
+description() {
+  cat <<EOF
+This script exists to address an issue where Node.js, used by VS Code Server,
+reserves an excessively large virtual memory space. On HPC cluster head nodes,
+virtual memory is often limited (e.g., 64 GB), and this behavior can lead to
+memory errors. The problem is not that VS Code itself uses excessive memory,
+but that Node.js reserves a large virtual memory area unnecessarily.
+
+This script provides two main functionalities:
+
+1. Print the path to the most recent code-server script and its status.
+2. Modify the VS Code Server's code-server script to include a specified
+   --max-old-space-size value for Node.js, limiting memory reservation.
+
+This is a workaround for users who cannot set 'ulimit -v unlimited' on their
+systems.
+
+EOF
+}
+
+extra_help() {
+  cat <<EOF
+optional arguments:
+  -h, --help                     show this help message and exit
+  --set-max-old-space-size=N     set the max-old-space-size for Node.js (default: 4096)
+  --nodeapp=NAME                 set the Node.js application name (default: node-real)
+  --vscode-dir=DIR               set the VS Code Server directory (default: \$HOME/.vscode-server/cli/servers/Stable-*)
+  --quiet                        suppress all output except errors
+
+Examples:
+
+    # Check the current status and memory usage
+    $initscript
+
+    # Set max-old-space-size to 8192
+    $initscript --set-max-old-space-size=8192
+
+    # Specify a custom Node.js application name
+    $initscript --nodeapp=node-custom
+
+    # Specify a custom VS Code Server directory
+    $initscript --vscode-dir=/custom/path/to/vscode-server
+
+    # Suppress all output except errors
+    $initscript --quiet
+
+EOF
+}
+
+MAX_OLD_SPACE_SIZE=4096
+SET_MAX_OLD_SPACE_SIZE=0
+NODEAPP="node-real"
+VSCODE_SERVER_DIR=""
+CODE_SERVER_SCRIPT=""
+QUIET=0
+
+eval set -- "${@//=/ }" # replace = with ' '
+
+while (("$#")); do
+  case "$1" in
+  -h | --help)
+    SHOW_HELP=1
+    shift
+    ;;
+  --set-max-old-space-size)
+    MAX_OLD_SPACE_SIZE=${2:-4096}
+    SET_MAX_OLD_SPACE_SIZE=1
+    if [[ -z "$2" ]]; then
+      echo "No size provided for --set-max-old-space-size. Using default: $MAX_OLD_SPACE_SIZE MB."
+    fi
+    shift 2
+    ;;
+  --nodeapp)
+    NODEAPP=$2
+    shift 2
+    ;;
+  --vscode-dir)
+    VSCODE_SERVER_DIR=$2
+    shift 2
+    ;;
+  --quiet)
+    QUIET=1
+    shift
+    ;;
+  -* | --*=)
+    usage
+    echo "$initscript: error: unsupported argument: $1" >&2
+    exit 1
+    ;;
+  *) # preserve positional arguments
+    usage
+    echo "$initscript: error: unsupported argument: $1" >&2
+    exit 1
+    ;;
+  esac
+done
+
+log() {
+  if [[ $QUIET -eq 0 ]]; then
+    echo "$@"
+  fi
+}
+
+if [[ -v SHOW_HELP ]]; then
+  usage
+  description
+  extra_help
+  exit 0
+fi
+
+# Set default values if not provided
+if [[ -z "$VSCODE_SERVER_DIR" ]]; then
+  VSCODE_SERVER_DIR=$(ls -td $HOME/.vscode-server/cli/servers/Stable-* 2>/dev/null | head -n 1)
+fi
+
+if [[ -z "$VSCODE_SERVER_DIR" ]]; then
+  log "No vscode-server installation found."
+  exit 1
+fi
+
+CODE_SERVER_SCRIPT="$VSCODE_SERVER_DIR/server/bin/code-server"
+
+if [[ ! -f "$CODE_SERVER_SCRIPT" ]]; then
+  log "code-server script not found in the most recent vscode-server installation."
+  exit 1
+fi
+
+CODE_SERVER_IDENTIFIER=$(basename "$VSCODE_SERVER_DIR")
+
+if [[ $SET_MAX_OLD_SPACE_SIZE -eq 1 ]]; then
+  # Check if the current value matches the desired value
+  if tail -n 1 "$CODE_SERVER_SCRIPT" | grep -q -- "--max-old-space-size=$MAX_OLD_SPACE_SIZE"; then
+    log "Did not update code-server script to set --max-old-space-size=$MAX_OLD_SPACE_SIZE: already set"
+    exit 0
+  fi
+
+  # Modify the last line of the code-server script if necessary
+  if ! tail -n 1 "$CODE_SERVER_SCRIPT" | grep -q -- "--max-old-space-size="; then
+    sed -i "\$ s|\"\$ROOT/node\"|\"\$ROOT/node\" --max-old-space-size=$MAX_OLD_SPACE_SIZE|" "$CODE_SERVER_SCRIPT"
+    log "Updated code-server script to include --max-old-space-size=$MAX_OLD_SPACE_SIZE."
+  else
+    sed -i "s|--max-old-space-size=[0-9]*|--max-old-space-size=$MAX_OLD_SPACE_SIZE|" "$CODE_SERVER_SCRIPT"
+    log "Updated code-server script to set --max-old-space-size=$MAX_OLD_SPACE_SIZE."
+  fi
+  exit 0
+fi
+
+# Default behavior: Display status and memory usage
+log "Most recent code-server script:"
+log "$CODE_SERVER_SCRIPT"
+
+if tail -n 1 "$CODE_SERVER_SCRIPT" | grep -q -- "--max-old-space-size="; then
+  CURRENT_MAX_OLD_SPACE_SIZE=$(tail -n 1 "$CODE_SERVER_SCRIPT" | awk -F'--max-old-space-size=' '{print $2}' | awk '{print $1}')
+  log "The code-server script is already hacked with --max-old-space-size=$CURRENT_MAX_OLD_SPACE_SIZE."
+else
+  log "The code-server script is NOT hacked with a --max-old-space-size flag."
+fi
+
+# Attempt to find Node.js processes
+NODE_PIDS=$(ps x | grep "$CODE_SERVER_IDENTIFIER/server/$NODEAPP" | grep -v grep | awk '{print $1}')
+
+if [[ -z "$NODE_PIDS" ]]; then
+  log -e "\nNo Node.js processes found for the most recent VS Code Server installation.\n"
+else
+  log -e "\nInspecting memory usage for Node.js processes:\n"
+  log "$(printf "% 8s %12s %12s %12s %12s\n" "PID" "VmPeak" "VmSize" "VmHWM" "VmRSS")"
+  for pid in $NODE_PIDS; do
+    VmPeak=$(awk '/VmPeak/ {print $2}' /proc/$pid/status)
+    VmSize=$(awk '/VmSize/ {print $2}' /proc/$pid/status)
+    VmHWM=$(awk '/VmHWM/ {print $2}' /proc/$pid/status)
+    VmRSS=$(awk '/VmRSS/ {print $2}' /proc/$pid/status)
+    log "$(printf "% 8s %12s %12s %12s %12s\n" "$pid" "$((VmPeak / 1024)) MB" "$((VmSize / 1024)) MB" "$((VmHWM / 1024)) MB" "$((VmRSS / 1024)) MB")"
+  done
+  log
+fi
+
+# Check maximum virtual memory size using ulimit
+ULIMIT_VMEM=$(ulimit -v)
+if [[ "$ULIMIT_VMEM" -eq "unlimited" ]]; then
+  log -e "Maximum virtual memory size: unlimited\n"
+else
+  log -e "Maximum virtual memory size: $((ULIMIT_VMEM / 1024)) MB\n"
+fi
+
+log "Memory term explanations:"
+log "- VmPeak: Peak virtual memory size used by the process."
+log "- VmSize: Current virtual memory size allocated to the process."
+log "- VmHWM: Peak resident set size (\"high water mark\"), the maximum physical memory used."
+log "- VmRSS: Current resident set size, the physical memory currently used."
+
+log "To restrict memory usage, run:"
+log "  $initscript --set-max-old-space-size=N"
+
+log "Replace N with the desired memory limit in MB (default: 4096)."
