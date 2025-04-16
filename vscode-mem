@@ -194,9 +194,13 @@ fi
 NODE_PIDS=$(ps x | grep "$CODE_SERVER_IDENTIFIER/server/$NODEAPP" | grep -v grep | awk '{print $1}')
 
 if [ -z "$NODE_PIDS" ]; then
-  log "\nNo Node.js processes found for the most recent VS Code Server installation.\n"
+  log ""
+  log "No Node.js processes found for the most recent VS Code Server installation."
+  log ""
 else
-  log "\nInspecting memory usage for Node.js processes:\n"
+  log ""
+  log "Inspecting memory usage for Node.js processes:"
+  log ""
   log "$(printf "% 8s %12s %12s %12s %12s\n" "PID" "VmPeak" "VmSize" "VmHWM" "VmRSS")"
   for pid in $NODE_PIDS; do
     VmPeak=$(awk '/VmPeak/ {print $2}' /proc/"$pid"/status)
@@ -205,15 +209,17 @@ else
     VmRSS=$(awk '/VmRSS/ {print $2}' /proc/"$pid"/status)
     log "$(printf "% 8s %12s %12s %12s %12s\n" "$pid" "$((VmPeak / 1024)) MB" "$((VmSize / 1024)) MB" "$((VmHWM / 1024)) MB" "$((VmRSS / 1024)) MB")"
   done
-  log
+  log ""
 fi
 
 # Check maximum virtual memory size using ulimit
 ULIMIT_VMEM=$(ulimit -v)
 if [ "$ULIMIT_VMEM" = "unlimited" ]; then
-  log "Maximum virtual memory size: unlimited\n"
+  log "Maximum virtual memory size: unlimited"
+  log ""
 else
-  log "Maximum virtual memory size: $((ULIMIT_VMEM / 1024)) MB\n"
+  log "Maximum virtual memory size: $((ULIMIT_VMEM / 1024)) MB"
+  log ""
 fi
 
 log "Memory term explanations:"
