@@ -150,16 +150,17 @@ of memory.
 By using this script, you can ensure that the VS Code server operates reliably
 in environments with strict virtual memory limits.
 
-### Additional Considerations for GitHub Copilot
+### Additional Considerations for Memory-Intensive Extensions
 
 While this script addresses memory issues with the VS Code server, you may
-encounter additional problems when using GitHub Copilot in remote environments.
-These issues arise because Copilot extensions are designed to run in the UI
-environment, and running them remotely can lead to instability.
+encounter additional problems when using memory-intensive extensions, such as
+GitHub Copilot, in remote environments. These issues arise because extensions
+powered by large language models often consume significant memory, which can
+exacerbate problems in shared environments with strict memory limits.
 
-To overcome these problems, you can configure GitHub Copilot to run from the
-host by adding the following settings to
-`$HOME/.vscode-server/data/Machine/settings.json`:
+To mitigate these issues, you can configure such extensions to run in the local
+UI environment instead of the remote environment. For GitHub Copilot, you can
+add the following settings to `$HOME/.vscode-server/data/Machine/settings.json`:
 
 ```json
 "remote.extensionKind": {
@@ -172,8 +173,7 @@ host by adding the following settings to
 }
 ```
 
-This ensures that the Copilot extensions run in the local UI environment,
-avoiding potential issues in the remote environment.
+This ensures that GitHub Copilot and similar extensions run locally, avoiding potential memory-related instability on the remote server. The same approach can be applied to other extensions that are known to be memory-intensive.
 
 ## Installation Instructions
 
