@@ -160,7 +160,8 @@ exacerbate problems in shared environments with strict memory limits.
 
 To mitigate these issues, you can configure such extensions to run in the local
 UI environment instead of the remote environment. For GitHub Copilot, you can
-add the following settings to `$HOME/.vscode-server/data/Machine/settings.json`:
+add the following settings to `$HOME/.vscode-server/data/Machine/settings.json`
+(through `Preferences -> Open Remote Settings (JSON)`)
 
 ```json
 "remote.extensionKind": {
