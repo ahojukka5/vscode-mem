@@ -21,7 +21,6 @@
 # SOFTWARE.
 
 set -e
-set -o pipefail
 
 initscript=$(basename "$0")
 
@@ -81,14 +80,15 @@ Examples:
 EOF
 }
 
-MAX_OLD_SPACE_SIZE=4096
+MAX_OLD_SPACE_SIZE=8192
 SET_MAX_OLD_SPACE_SIZE=0
-NODEAPP="node-real"
+NODEAPP="node"
 VSCODE_SERVER_DIR=""
 CODE_SERVER_SCRIPT=""
 QUIET=0
+DEBUG=0
 
-eval set -- "${@//=/ }" # replace = with ' '
+set -- $(printf '%s\n' "$@" | sed 's/=/ /g')
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -97,12 +97,20 @@ while [ "$#" -gt 0 ]; do
     shift
     ;;
   --set-max-old-space-size)
-    MAX_OLD_SPACE_SIZE=${2:-4096}
-    SET_MAX_OLD_SPACE_SIZE=1
-    if [ -z "$2" ]; then
+    if [ -n "$2" ] && [ "${2#-}" != "$2" ]; then
+      # If the next argument starts with a dash or is missing, treat it as missing
       echo "No size provided for --set-max-old-space-size. Using default: $MAX_OLD_SPACE_SIZE MB."
+      SET_MAX_OLD_SPACE_SIZE=1
+      shift
+    elif [ -n "$2" ]; then
+      MAX_OLD_SPACE_SIZE=$2
+      SET_MAX_OLD_SPACE_SIZE=1
+      shift 2
+    else
+      echo "No size provided for --set-max-old-space-size. Using default: $MAX_OLD_SPACE_SIZE MB."
+      SET_MAX_OLD_SPACE_SIZE=1
+      shift
     fi
-    shift 2
     ;;
   --nodeapp)
     NODEAPP=$2
@@ -114,6 +122,10 @@ while [ "$#" -gt 0 ]; do
     ;;
   --quiet)
     QUIET=1
+    shift
+    ;;
+  --debug)
+    DEBUG=1
     shift
     ;;
   -* | --*=)
@@ -132,6 +144,12 @@ done
 log() {
   if [ "$QUIET" -eq 0 ]; then
     echo "$@"
+  fi
+}
+
+log_debug() {
+  if [ "$DEBUG" -eq 1 ]; then
+    echo "DEBUG: $@"
   fi
 }
 
@@ -160,6 +178,10 @@ if [ ! -f "$CODE_SERVER_SCRIPT" ]; then
 fi
 
 CODE_SERVER_IDENTIFIER=$(basename "$VSCODE_SERVER_DIR")
+
+log_debug "CODE_SERVER_SCRIPT=$CODE_SERVER_SCRIPT"
+log_debug "CODE_SERVER_IDENTIFIER=$CODE_SERVER_IDENTIFIER"
+log_debug "NODEAPP=$NODEAPP"
 
 if [ "$SET_MAX_OLD_SPACE_SIZE" -eq 1 ]; then
   # Check if the current value matches the desired value
@@ -232,4 +254,4 @@ log ""
 log "To restrict memory usage, run:"
 log "  $initscript --set-max-old-space-size=N"
 log ""
-log "Replace N with the desired memory limit in MB (default: 4096)."
+log "Replace N with the desired memory limit in MB (default: 8192)."
