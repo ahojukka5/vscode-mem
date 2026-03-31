@@ -1,4 +1,4 @@
-## vscode-mem - solve Remote-SSH disconnection issues in Visual Studio Code
+## vscode-mem - solve Remote-SSH disconnection issues in VS Code and Cursor
 
 **TLDR**:
 
@@ -8,11 +8,15 @@ chmod +x vscode-mem
 ./vscode-mem --set-max-old-space-size=8192
 ```
 
-Are you experiencing mysterious Remote-SSH disconnections in Visual Studio Code?
-This issue is often caused by Node.js reserving excessive virtual memory,
-exceeding system limits in shared environments. This repository provides a
-script to fix the problem by adjusting memory settings, ensuring stable
+Are you experiencing mysterious Remote-SSH disconnections in **VS Code** or
+**Cursor**? This issue is often caused by Node.js reserving excessive virtual
+memory, exceeding system limits in shared environments. This repository provides
+a script to fix the problem by adjusting memory settings, ensuring stable
 Remote-SSH connections.
+
+The same workaround applies to both editors: the script finds each remote
+installation it can (`~/.vscode-server` and/or `~/.cursor-server`) and patches
+the corresponding launcher (`code-server` and/or `cursor-server`).
 
 Visual Studio Code may encounter issues in shared environments due to a design
 fault in Node.js. Node.js reserves a large virtual memory area, even though the
@@ -31,7 +35,8 @@ administrators often configure strict memory usage limits to protect resources.
 If a process tries to reserve more virtual memory than allowed, it crashes
 immediately, even if the actual memory usage is low.
 
-Node.js, which powers the backend of Visual Studio Code, aggressively reserves
+Node.js, which powers the backend of Visual Studio Code and Cursor’s remote
+server, aggressively reserves
 virtual memory at startup for purposes such as JIT compilation, large typed
 arrays, and V8 heap segments. This behavior is especially common in
 Electron-based environments like VS Code, where extensions like GitHub Copilot
@@ -81,11 +86,19 @@ file locks                      (-x) unlimited
 ## How This Script Works
 
 This script attempts to address the virtual memory issue by modifying the
-startup files of the VS Code server. Specifically, it adds the
-`--max-old-space-size` argument to the Node.js process used by the VS Code
-server. This argument restricts the amount of memory reserved by Node.js,
-ensuring that it stays within the limits of the system's virtual memory
-configuration.
+launcher scripts used by the remote editor: **VS Code** (`server/bin/code-server`
+under `~/.vscode-server/cli/servers/…`) and/or **Cursor** (`bin/cursor-server`
+under `~/.cursor-server/bin/…`). It adds the `--max-old-space-size` argument to
+the `node` invocation on the last line of each launcher. That limits how much
+heap space Node reserves, so it stays within the system’s virtual memory limits.
+
+If both VS Code and Cursor remote installs are present, the script reports and
+can patch **both**. Use `--vscode-dir` or `--cursor-dir` to point at a specific
+tree when auto-discovery is wrong.
+
+**Platform:** Remote-SSH targets are almost always **GNU/Linux**. In-place edits
+use **GNU `sed -i`** (BSD/macOS `sed` uses different syntax). The optional memory
+table reads **`/proc/$pid/status`**, which exists only on Linux.
 
 ### Command-Line Options
 
@@ -97,14 +110,15 @@ a full list of available options and their usage, run:
 ```
 
 This will display detailed information about the supported arguments, including
-how to set the `--max-old-space-size`, specify a custom Node.js application
-name, or define a custom VS Code Server directory.
+how to set `--max-old-space-size` (must be a positive integer, in MB), specify a
+custom Node binary name for matching processes (`--nodeapp`), or set
+`--vscode-dir` / `--cursor-dir` explicitly.
 
 ### Memory Usage Information
 
 In addition to modifying the startup files, the script provides detailed memory
-usage information for the Node.js processes associated with the VS Code server.
-For example:
+usage information for Node.js processes associated with each discovered server
+(VS Code and/or Cursor). For example:
 
 ```text
 Inspecting memory usage for Node.js processes:
@@ -125,7 +139,7 @@ Memory term explanations:
 To restrict memory usage, run:
   vscode-mem --set-max-old-space-size=N
 
-Replace N with the desired memory limit in MB (default: 4096).
+Replace N with the desired memory limit in MB (default: 8192).
 ```
 
 Here is what the memory terms mean:
@@ -136,32 +150,34 @@ Here is what the memory terms mean:
 
 ### Example Usage
 
-To restrict the memory usage of the VS Code server, you can run the script with
-the `--set-max-old-space-size` option:
+To restrict the memory usage of the remote server(s), run the script with
+`--set-max-old-space-size`:
 
 ```bash
 ./vscode-mem --set-max-old-space-size=8192
 ```
 
-This will modify the VS Code server's startup script to include the
-`--max-old-space-size=8192` argument, limiting Node.js to use a maximum of 8 GB
-of memory.
+This updates each discovered launcher (VS Code `code-server` and/or Cursor
+`cursor-server`) so Node is started with `--max-old-space-size=8192`, limiting
+the V8 heap reservation (here, 8 GB).
 
-By using this script, you can ensure that the VS Code server operates reliably
-in environments with strict virtual memory limits.
+By using this script, you can ensure that the remote editor server operates
+reliably in environments with strict virtual memory limits.
 
 ### Additional Considerations for Memory-Intensive Extensions
 
-While this script addresses memory issues with the VS Code server, you may
+While this script addresses memory issues with the remote Node server, you may
 encounter additional problems when using memory-intensive extensions, such as
 GitHub Copilot, in remote environments. These issues arise because extensions
 powered by large language models often consume significant memory, which can
 exacerbate problems in shared environments with strict memory limits.
 
 To mitigate these issues, you can configure such extensions to run in the local
-UI environment instead of the remote environment. For GitHub Copilot, you can
-add the following settings to `$HOME/.vscode-server/data/Machine/settings.json`
-(through `Preferences -> Open Remote Settings (JSON)`)
+UI environment instead of the remote environment. For GitHub Copilot in **VS Code**,
+add the following to `$HOME/.vscode-server/data/Machine/settings.json`
+(through **Preferences → Open Remote Settings (JSON)**). For **Cursor**, use the
+same keys under `$HOME/.cursor-server/data/Machine/settings.json` if you edit
+remote settings manually.
 
 ```json
 "remote.extensionKind": {
@@ -193,7 +209,8 @@ To install and use this script, follow these steps:
    ```
 
 3. (Optional) Add the script to your `.bash_profile` or `.bashrc` to
-   automatically patch the VS Code server files whenever they are updated:
+   automatically patch the remote launcher(s) after server updates (covers both
+   VS Code and Cursor when installed):
    ```bash
    echo 'vscode-mem --set-max-old-space-size=8192' >> ~/.bash_profile
    ```
@@ -205,8 +222,9 @@ To install and use this script, follow these steps:
    source ~/.bash_profile
    ```
 
-Now, the script is ready to use. You can run it manually or let it automatically
-patch the VS Code server files during startup.
+Now, the script is ready to use. You can run it manually or let it run on login
+so `code-server` / `cursor-server` pick up `--max-old-space-size` after the
+editor updates its remote binaries.
 
 ## License
 
