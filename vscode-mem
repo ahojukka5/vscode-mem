@@ -103,6 +103,18 @@ CURSOR_SERVER_SCRIPT=""
 CODE_SERVER_IDENTIFIER=""
 CURSOR_SERVER_IDENTIFIER=""
 
+log() {
+  if [ "$QUIET" -eq 0 ]; then
+    echo "$@"
+  fi
+}
+
+log_debug() {
+  if [ "$DEBUG" -eq 1 ]; then
+    echo "DEBUG: $@"
+  fi
+}
+
 set -- $(printf '%s\n' "$@" | sed 's/=/ /g')
 
 while [ "$#" -gt 0 ]; do
@@ -113,7 +125,7 @@ while [ "$#" -gt 0 ]; do
     ;;
   --set-max-old-space-size)
     if [ -n "$2" ] && [ "${2#-}" != "$2" ]; then
-      echo "No size provided for --set-max-old-space-size. Using default: $MAX_OLD_SPACE_SIZE MB."
+      log "No size provided for --set-max-old-space-size. Using default: $MAX_OLD_SPACE_SIZE MB."
       SET_MAX_OLD_SPACE_SIZE=1
       shift
     elif [ -n "$2" ]; then
@@ -121,7 +133,7 @@ while [ "$#" -gt 0 ]; do
       SET_MAX_OLD_SPACE_SIZE=1
       shift 2
     else
-      echo "No size provided for --set-max-old-space-size. Using default: $MAX_OLD_SPACE_SIZE MB."
+      log "No size provided for --set-max-old-space-size. Using default: $MAX_OLD_SPACE_SIZE MB."
       SET_MAX_OLD_SPACE_SIZE=1
       shift
     fi
@@ -170,18 +182,6 @@ while [ "$#" -gt 0 ]; do
     ;;
   esac
 done
-
-log() {
-  if [ "$QUIET" -eq 0 ]; then
-    echo "$@"
-  fi
-}
-
-log_debug() {
-  if [ "$DEBUG" -eq 1 ]; then
-    echo "DEBUG: $@"
-  fi
-}
 
 # Newest bin/cursor-server under ~/.cursor-server/bin (by mtime).
 find_latest_cursor_server_script() {
