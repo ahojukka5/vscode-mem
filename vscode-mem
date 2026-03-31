@@ -208,11 +208,7 @@ find_latest_cursor_server_script() {
   if [ ! -d "$HOME/.cursor-server/bin" ]; then
     return 1
   fi
-  cursor_files=$(find "$HOME/.cursor-server/bin" -type f -path '*/bin/cursor-server' 2>/dev/null) || cursor_files=""
-  if [ -z "$cursor_files" ]; then
-    return 1
-  fi
-  result=$(printf '%s\n' "$cursor_files" | xargs ls -t 2>/dev/null | head -n 1)
+  result=$(find "$HOME/.cursor-server/bin" -type f -path '*/bin/cursor-server' -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -n 1)
   if [ -z "$result" ]; then
     return 1
   fi
