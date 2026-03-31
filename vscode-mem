@@ -226,7 +226,7 @@ patch_launcher_script() {
       sed -i "\$ s|\"\$ROOT/node\"|\"\$ROOT/node\" --max-old-space-size=$MAX_OLD_SPACE_SIZE|" "$launcher_path"
       log "Updated $label launcher to include --max-old-space-size=$MAX_OLD_SPACE_SIZE."
     else
-      sed -i "s|--max-old-space-size=[0-9]*|--max-old-space-size=$MAX_OLD_SPACE_SIZE|" "$launcher_path"
+      sed -i "\$ s|--max-old-space-size=[0-9]*|--max-old-space-size=$MAX_OLD_SPACE_SIZE|" "$launcher_path"
       log "Updated $label launcher to set --max-old-space-size=$MAX_OLD_SPACE_SIZE."
     fi
   else
