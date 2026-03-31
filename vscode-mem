@@ -20,6 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+# Intended for remote GNU/Linux hosts (VS Code / Cursor Remote over SSH): in-place
+# edits use GNU sed "sed -i ..." syntax. On BSD/macOS, sed -i usually requires a
+# backup suffix (e.g. sed -i '' ...). The memory table below reads Linux /proc.
+
 set -e
 
 initscript=$(basename "$0")
@@ -246,6 +250,8 @@ print_launcher_hack_status() {
   fi
 }
 
+# Reads Vm* fields from /proc/$pid/status (Linux). Non-Linux systems have no
+# matching paths; those PIDs are skipped silently.
 print_node_memory_for_identifier() {
   identifier=$1
   label=$2
