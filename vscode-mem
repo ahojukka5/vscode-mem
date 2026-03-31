@@ -127,14 +127,26 @@ while [ "$#" -gt 0 ]; do
     fi
     ;;
   --nodeapp)
+    if [ -z "$2" ] || [ "${2#-}" != "$2" ]; then
+      echo "$initscript: error: --nodeapp requires a non-empty value" >&2
+      exit 2
+    fi
     NODEAPP=$2
     shift 2
     ;;
   --vscode-dir)
+    if [ -z "$2" ] || [ "${2#-}" != "$2" ]; then
+      echo "$initscript: error: --vscode-dir requires a non-empty path" >&2
+      exit 2
+    fi
     VSCODE_SERVER_DIR=$2
     shift 2
     ;;
   --cursor-dir)
+    if [ -z "$2" ] || [ "${2#-}" != "$2" ]; then
+      echo "$initscript: error: --cursor-dir requires a non-empty path" >&2
+      exit 2
+    fi
     CURSOR_SERVER_DIR=$2
     shift 2
     ;;
