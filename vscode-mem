@@ -1,17 +1,17 @@
 #!/bin/sh
 
-# Copyright (c) 2025 Jukka Aho
-# 
+# Copyright (c) 2026 Jukka Aho
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -26,24 +26,25 @@ initscript=$(basename "$0")
 
 usage() {
   cat <<EOF
-usage: $initscript [-h] [--set-max-old-space-size=N] [--nodeapp=NAME] [--vscode-dir=DIR] [--quiet]
+usage: $initscript [-h] [--set-max-old-space-size=N] [--nodeapp=NAME] [--vscode-dir=DIR] [--cursor-dir=DIR] [--quiet]
 
 EOF
 }
 
 description() {
   cat <<EOF
-This script exists to address an issue where Node.js, used by VS Code Server,
-reserves an excessively large virtual memory space. On HPC cluster head nodes,
-virtual memory is often limited (e.g., 64 GB), and this behavior can lead to
-memory errors. The problem is not that VS Code itself uses excessive memory,
-but that Node.js reserves a large virtual memory area unnecessarily.
+This script exists to address an issue where Node.js, used by VS Code Server or
+Cursor Server, reserves an excessively large virtual memory space. On HPC cluster
+head nodes, virtual memory is often limited (e.g., 64 GB), and this behavior can
+lead to memory errors. The problem is not that the editor itself uses excessive
+memory, but that Node.js reserves a large virtual memory area unnecessarily.
 
 This script provides two main functionalities:
 
-1. Print the path to the most recent code-server script and its status.
-2. Modify the VS Code Server's code-server script to include a specified
-   --max-old-space-size value for Node.js, limiting memory reservation.
+1. Print the path to the most recent code-server (VS Code) and/or cursor-server
+   (Cursor) launcher scripts and their status.
+2. Modify those launcher scripts to include a specified --max-old-space-size
+   value for Node.js, limiting memory reservation.
 
 This is a workaround for users who cannot set 'ulimit -v unlimited' on their
 systems.
@@ -55,24 +56,32 @@ extra_help() {
   cat <<EOF
 optional arguments:
   -h, --help                     show this help message and exit
-  --set-max-old-space-size=N     set the max-old-space-size for Node.js (default: 4096)
-  --nodeapp=NAME                 set the Node.js application name (default: node-real)
+  --set-max-old-space-size=N     set the max-old-space-size for Node.js (default: 8192)
+  --nodeapp=NAME                 set the Node.js binary name in process paths (default: node)
   --vscode-dir=DIR               set the VS Code Server directory (default: \$HOME/.vscode-server/cli/servers/Stable-*)
+  --cursor-dir=DIR               set the Cursor Server root (directory containing bin/cursor-server; default: newest under \$HOME/.cursor-server/bin)
   --quiet                        suppress all output except errors
+
+When no directory overrides are given, the script discovers the newest VS Code
+Remote installation (if any) and the newest Cursor Remote installation (if any)
+and operates on all that are present.
 
 Examples:
 
     # Check the current status and memory usage
     $initscript
 
-    # Set max-old-space-size to 8192
+    # Set max-old-space-size to 8192 on all discovered installations
     $initscript --set-max-old-space-size=8192
 
-    # Specify a custom Node.js application name
+    # Specify a custom Node.js binary name for matching processes in ps
     $initscript --nodeapp=node-custom
 
     # Specify a custom VS Code Server directory
     $initscript --vscode-dir=/custom/path/to/vscode-server
+
+    # Specify a custom Cursor Server root (parent of bin/cursor-server)
+    $initscript --cursor-dir=/custom/path/to/linux-x64/<hash>
 
     # Suppress all output except errors
     $initscript --quiet
@@ -84,9 +93,15 @@ MAX_OLD_SPACE_SIZE=8192
 SET_MAX_OLD_SPACE_SIZE=0
 NODEAPP="node"
 VSCODE_SERVER_DIR=""
-CODE_SERVER_SCRIPT=""
+CURSOR_SERVER_DIR=""
 QUIET=0
 DEBUG=0
+
+# Populated after discovery
+CODE_SERVER_SCRIPT=""
+CURSOR_SERVER_SCRIPT=""
+CODE_SERVER_IDENTIFIER=""
+CURSOR_SERVER_IDENTIFIER=""
 
 set -- $(printf '%s\n' "$@" | sed 's/=/ /g')
 
@@ -98,7 +113,6 @@ while [ "$#" -gt 0 ]; do
     ;;
   --set-max-old-space-size)
     if [ -n "$2" ] && [ "${2#-}" != "$2" ]; then
-      # If the next argument starts with a dash or is missing, treat it as missing
       echo "No size provided for --set-max-old-space-size. Using default: $MAX_OLD_SPACE_SIZE MB."
       SET_MAX_OLD_SPACE_SIZE=1
       shift
@@ -120,6 +134,10 @@ while [ "$#" -gt 0 ]; do
     VSCODE_SERVER_DIR=$2
     shift 2
     ;;
+  --cursor-dir)
+    CURSOR_SERVER_DIR=$2
+    shift 2
+    ;;
   --quiet)
     QUIET=1
     shift
@@ -133,7 +151,7 @@ while [ "$#" -gt 0 ]; do
     echo "$initscript: error: unsupported argument: $1" >&2
     exit 1
     ;;
-  *) # preserve positional arguments
+  *)
     usage
     echo "$initscript: error: unsupported argument: $1" >&2
     exit 1
@@ -153,6 +171,81 @@ log_debug() {
   fi
 }
 
+# Newest bin/cursor-server under ~/.cursor-server/bin (by mtime).
+find_latest_cursor_server_script() {
+  if [ ! -d "$HOME/.cursor-server/bin" ]; then
+    return 1
+  fi
+  cursor_files=$(find "$HOME/.cursor-server/bin" -type f -path '*/bin/cursor-server' 2>/dev/null) || cursor_files=""
+  if [ -z "$cursor_files" ]; then
+    return 1
+  fi
+  result=$(printf '%s\n' "$cursor_files" | xargs ls -t 2>/dev/null | head -n 1)
+  if [ -z "$result" ]; then
+    return 1
+  fi
+  printf '%s\n' "$result"
+  return 0
+}
+
+# Apply --max-old-space-size to a launcher (code-server or cursor-server) using the same sed rules as before.
+patch_launcher_script() {
+  launcher_path=$1
+  label=$2
+
+  if ! tail -n 1 "$launcher_path" | grep -q -- "--max-old-space-size=$MAX_OLD_SPACE_SIZE"; then
+    if ! tail -n 1 "$launcher_path" | grep -q -- "--max-old-space-size="; then
+      sed -i "\$ s|\"\$ROOT/node\"|\"\$ROOT/node\" --max-old-space-size=$MAX_OLD_SPACE_SIZE|" "$launcher_path"
+      log "Updated $label launcher to include --max-old-space-size=$MAX_OLD_SPACE_SIZE."
+    else
+      sed -i "s|--max-old-space-size=[0-9]*|--max-old-space-size=$MAX_OLD_SPACE_SIZE|" "$launcher_path"
+      log "Updated $label launcher to set --max-old-space-size=$MAX_OLD_SPACE_SIZE."
+    fi
+  else
+    log "Did not update $label launcher: --max-old-space-size=$MAX_OLD_SPACE_SIZE already set."
+  fi
+}
+
+print_launcher_hack_status() {
+  launcher_path=$1
+  label=$2
+
+  if tail -n 1 "$launcher_path" | grep -q -- "--max-old-space-size="; then
+    CURRENT_MAX_OLD_SPACE_SIZE=$(tail -n 1 "$launcher_path" | awk -F'--max-old-space-size=' '{print $2}' | awk '{print $1}')
+    log "The $label launcher is already using --max-old-space-size=$CURRENT_MAX_OLD_SPACE_SIZE."
+  else
+    log "The $label launcher does NOT include a --max-old-space-size flag."
+  fi
+}
+
+print_node_memory_for_identifier() {
+  identifier=$1
+  label=$2
+
+  NODE_PIDS=$(ps x | grep "$identifier" | grep "/$NODEAPP" | grep -v grep | awk '{print $1}')
+
+  if [ -z "$NODE_PIDS" ]; then
+    log ""
+    log "No Node.js processes found for $label (identifier $identifier)."
+    log ""
+  else
+    log ""
+    log "Inspecting memory usage for Node.js processes ($label):"
+    log ""
+    log "$(printf "% 8s %12s %12s %12s %12s\n" "PID" "VmPeak" "VmSize" "VmHWM" "VmRSS")"
+    for pid in $NODE_PIDS; do
+      if [ -r "/proc/$pid/status" ]; then
+        VmPeak=$(awk '/VmPeak/ {print $2}' "/proc/$pid/status")
+        VmSize=$(awk '/VmSize/ {print $2}' "/proc/$pid/status")
+        VmHWM=$(awk '/VmHWM/ {print $2}' "/proc/$pid/status")
+        VmRSS=$(awk '/VmRSS/ {print $2}' "/proc/$pid/status")
+        log "$(printf "% 8s %12s %12s %12s %12s\n" "$pid" "$((VmPeak / 1024)) MB" "$((VmSize / 1024)) MB" "$((VmHWM / 1024)) MB" "$((VmRSS / 1024)) MB")"
+      fi
+    done
+    log ""
+  fi
+}
+
 if [ -n "${SHOW_HELP+x}" ]; then
   usage
   description
@@ -160,78 +253,86 @@ if [ -n "${SHOW_HELP+x}" ]; then
   exit 0
 fi
 
-# Set default values if not provided
+# --- Discover VS Code Remote ---
 if [ -z "$VSCODE_SERVER_DIR" ]; then
   VSCODE_SERVER_DIR=$(ls -td "$HOME"/.vscode-server/cli/servers/Stable-* 2>/dev/null | head -n 1)
 fi
 
-if [ -z "$VSCODE_SERVER_DIR" ]; then
-  log "No vscode-server installation found."
+if [ -n "$VSCODE_SERVER_DIR" ]; then
+  _cs="$VSCODE_SERVER_DIR/server/bin/code-server"
+  if [ -f "$_cs" ]; then
+    CODE_SERVER_SCRIPT="$_cs"
+  else
+    log "VS Code Server directory has no code-server at server/bin/code-server: $VSCODE_SERVER_DIR"
+  fi
+fi
+
+# --- Discover Cursor Remote ---
+if [ -z "$CURSOR_SERVER_DIR" ]; then
+  CURSOR_SERVER_SCRIPT=""
+  if _cf=$(find_latest_cursor_server_script); then
+    CURSOR_SERVER_SCRIPT=$_cf
+  fi
+else
+  CURSOR_SERVER_SCRIPT="$CURSOR_SERVER_DIR/bin/cursor-server"
+fi
+
+if [ -n "$CURSOR_SERVER_DIR" ] && [ ! -f "$CURSOR_SERVER_SCRIPT" ]; then
+  log "Cursor Server launcher not found: $CURSOR_SERVER_SCRIPT"
+  CURSOR_SERVER_SCRIPT=""
+fi
+
+if [ -z "$CODE_SERVER_SCRIPT" ] && [ -z "$CURSOR_SERVER_SCRIPT" ]; then
+  log "No vscode-server or cursor-server installation found."
   exit 1
 fi
 
-CODE_SERVER_SCRIPT="$VSCODE_SERVER_DIR/server/bin/code-server"
-
-if [ ! -f "$CODE_SERVER_SCRIPT" ]; then
-  log "code-server script not found in the most recent vscode-server installation."
-  exit 1
+CODE_SERVER_IDENTIFIER=""
+if [ -n "$CODE_SERVER_SCRIPT" ]; then
+  CODE_SERVER_IDENTIFIER=$(basename "$VSCODE_SERVER_DIR")
 fi
 
-CODE_SERVER_IDENTIFIER=$(basename "$VSCODE_SERVER_DIR")
+if [ -n "$CURSOR_SERVER_SCRIPT" ]; then
+  CURSOR_SERVER_IDENTIFIER=$(basename "$(dirname "$(dirname "$CURSOR_SERVER_SCRIPT")")")
+fi
 
 log_debug "CODE_SERVER_SCRIPT=$CODE_SERVER_SCRIPT"
+log_debug "CURSOR_SERVER_SCRIPT=$CURSOR_SERVER_SCRIPT"
 log_debug "CODE_SERVER_IDENTIFIER=$CODE_SERVER_IDENTIFIER"
+log_debug "CURSOR_SERVER_IDENTIFIER=$CURSOR_SERVER_IDENTIFIER"
 log_debug "NODEAPP=$NODEAPP"
 
 if [ "$SET_MAX_OLD_SPACE_SIZE" -eq 1 ]; then
-  # Check if the current value matches the desired value
-  if tail -n 1 "$CODE_SERVER_SCRIPT" | grep -q -- "--max-old-space-size=$MAX_OLD_SPACE_SIZE"; then
-    log "Did not update code-server script to set --max-old-space-size=$MAX_OLD_SPACE_SIZE: already set"
-    exit 0
+  if [ -n "$CODE_SERVER_SCRIPT" ]; then
+    patch_launcher_script "$CODE_SERVER_SCRIPT" "VS Code"
   fi
-
-  # Modify the last line of the code-server script if necessary
-  if ! tail -n 1 "$CODE_SERVER_SCRIPT" | grep -q -- "--max-old-space-size="; then
-    sed -i "\$ s|\"\$ROOT/node\"|\"\$ROOT/node\" --max-old-space-size=$MAX_OLD_SPACE_SIZE|" "$CODE_SERVER_SCRIPT"
-    log "Updated code-server script to include --max-old-space-size=$MAX_OLD_SPACE_SIZE."
-  else
-    sed -i "s|--max-old-space-size=[0-9]*|--max-old-space-size=$MAX_OLD_SPACE_SIZE|" "$CODE_SERVER_SCRIPT"
-    log "Updated code-server script to set --max-old-space-size=$MAX_OLD_SPACE_SIZE."
+  if [ -n "$CURSOR_SERVER_SCRIPT" ]; then
+    patch_launcher_script "$CURSOR_SERVER_SCRIPT" "Cursor"
   fi
   exit 0
 fi
 
 # Default behavior: Display status and memory usage
-log "Most recent code-server script:"
-log "$CODE_SERVER_SCRIPT"
-
-if tail -n 1 "$CODE_SERVER_SCRIPT" | grep -q -- "--max-old-space-size="; then
-  CURRENT_MAX_OLD_SPACE_SIZE=$(tail -n 1 "$CODE_SERVER_SCRIPT" | awk -F'--max-old-space-size=' '{print $2}' | awk '{print $1}')
-  log "The code-server script is already hacked with --max-old-space-size=$CURRENT_MAX_OLD_SPACE_SIZE."
-else
-  log "The code-server script is NOT hacked with a --max-old-space-size flag."
+if [ -n "$CODE_SERVER_SCRIPT" ]; then
+  log "VS Code (code-server) launcher:"
+  log "$CODE_SERVER_SCRIPT"
+  log ""
+  print_launcher_hack_status "$CODE_SERVER_SCRIPT" "VS Code"
 fi
 
-# Attempt to find Node.js processes
-NODE_PIDS=$(ps x | grep "$CODE_SERVER_IDENTIFIER/server/$NODEAPP" | grep -v grep | awk '{print $1}')
+if [ -n "$CURSOR_SERVER_SCRIPT" ]; then
+  log "Cursor (cursor-server) launcher:"
+  log "$CURSOR_SERVER_SCRIPT"
+  log ""
+  print_launcher_hack_status "$CURSOR_SERVER_SCRIPT" "Cursor"
+fi
 
-if [ -z "$NODE_PIDS" ]; then
-  log ""
-  log "No Node.js processes found for the most recent VS Code Server installation."
-  log ""
-else
-  log ""
-  log "Inspecting memory usage for Node.js processes:"
-  log ""
-  log "$(printf "% 8s %12s %12s %12s %12s\n" "PID" "VmPeak" "VmSize" "VmHWM" "VmRSS")"
-  for pid in $NODE_PIDS; do
-    VmPeak=$(awk '/VmPeak/ {print $2}' /proc/"$pid"/status)
-    VmSize=$(awk '/VmSize/ {print $2}' /proc/"$pid"/status)
-    VmHWM=$(awk '/VmHWM/ {print $2}' /proc/"$pid"/status)
-    VmRSS=$(awk '/VmRSS/ {print $2}' /proc/"$pid"/status)
-    log "$(printf "% 8s %12s %12s %12s %12s\n" "$pid" "$((VmPeak / 1024)) MB" "$((VmSize / 1024)) MB" "$((VmHWM / 1024)) MB" "$((VmRSS / 1024)) MB")"
-  done
-  log ""
+if [ -n "$CODE_SERVER_IDENTIFIER" ]; then
+  print_node_memory_for_identifier "$CODE_SERVER_IDENTIFIER" "VS Code Server"
+fi
+
+if [ -n "$CURSOR_SERVER_IDENTIFIER" ]; then
+  print_node_memory_for_identifier "$CURSOR_SERVER_IDENTIFIER" "Cursor Server"
 fi
 
 # Check maximum virtual memory size using ulimit
@@ -255,3 +356,4 @@ log "To restrict memory usage, run:"
 log "  $initscript --set-max-old-space-size=N"
 log ""
 log "Replace N with the desired memory limit in MB (default: 8192)."
+log "When both VS Code and Cursor are installed, this updates both launcher scripts."
