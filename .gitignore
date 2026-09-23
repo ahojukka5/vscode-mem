@@ -1,0 +1,14 @@
+
+# Generated local state. Not source.
+Manifest.toml
+Manifest-*.toml
+LocalPreferences.toml
+*.mem
+.pytest_cache/
+.quarto/
+_build/
+runs/
+*.out
+*.err
+run.log
+inst.log
